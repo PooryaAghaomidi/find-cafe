@@ -102,7 +102,7 @@ if __name__ == "__main__":
     valid_province, valid_city = create_valids('cafe_analysis.json')
     cleaned_data = apply_filter('cafe_clean.jsonl', valid_province, valid_city, remove_attributes, valid_attributes)
     
-    with jsonlines.open('cafe_ready.json', 'w') as writer:
+    with jsonlines.open('cafe_ready.jsonl', 'w') as writer:
         for entry in cleaned_data:
             writer.write(entry)
 
