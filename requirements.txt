@@ -4,3 +4,5 @@ lxml
 tqdm
 jsonlines
 pymongo
+openai
+streamlit
