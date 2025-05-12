@@ -1,5 +1,5 @@
-import json
 import re
+import json
 from tqdm import tqdm
 from urllib.parse import unquote
 
@@ -10,7 +10,7 @@ def is_persian_url(url):
 def is_valid_cafe(cafe):
     return (
         cafe.get("name") is not None and
-        cafe.get("location") is not None and
+        cafe.get("address") is not None and
         cafe.get("attributes")
     )
 
