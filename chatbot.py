@@ -1,5 +1,7 @@
 import re
 import json
+import uuid
+import logging
 from openai import OpenAI
 from pymongo import MongoClient
 
@@ -8,34 +10,55 @@ class CafeFinder:
     def __init__(self, province, api_key, base_url, llm_model="gpt-4o"):
         client = MongoClient("mongodb://localhost:27017/")
         self.collection = client["places"][province]
+        self.chats = client["places"]["chats"]
 
         self.llm_model = llm_model
         self.client = OpenAI(api_key=api_key, base_url=base_url)
 
+        logging.basicConfig(level=logging.INFO)
+
+        self.main_system_prompt = "تو یک دستیار هوشمند هستی که به افراد کمک می‌کند تا کافه یا رستوران مورد نظرشان را پیدا کنند."
+
+
     def extraction_agent(self, text):
         prompt = f"""
-                  تو یک استخراج کننده اطلاعات از متن هستی که باید اطلاعات مورد نظر زیر رو از پیام استخراج کنی:
-                  1. نام کافه یا رستوران
-                  2. موقعیت مکانی/محل رستوران
-                  3. قابلیت سیگار کشیدن در محل
-                  4. فضای باز
-                  5. بازی و سرگرمی
-                  6. تلویزیون
+                  You are a helpful assistant. You extract information related to cafe or restaurant features.
+                  Here are the features you must extract from a Persian text you get:
+                  1. Name of the place
+                  2. Location or area of the place
+                  3. Nearest subway
+                  4. If you can smoke
+                  5. If you can play game (entertainment)
+                  6. If you can watch TV stream
+                  7. If it has an open space
+                  8. If they serve breakfast
+                  9. If they play music
+                  10. If they have VIP space
+                  11. If they have Wi-Fi
+                  12. If they have time limit
 
-                  اگر هر کدام از اطلاعات بالا ذکر نشده بود مقدار null انتخاب کن
-
-                  متن:
+                  Message:
                   {text}
 
-                  جواب باید یک فایل JSON به شکل زیر باشد
+                  If any variable is missing in the message, it must be null.
+                  Your output must be a structures JSON file like this:
+
                   {{
                       "name": "...",
                       "area": "...",
-                      "smoke": True or False,
-                      "open_space": True or False,
-                      "game": True or False,
-                      "TV": True or False
+                      "subway": "...",
+                      "smoking": "yes or no",
+                      "open_space": "yes or no",
+                      "breakfast": "yes or no",
+                      "music": "yes or no",
+                      "vip_space": "yes or no",
+                      "entertainment": "yes or no",
+                      "WiFi": "yes or no",
+                      "time_limit": "yes or no",
+                      "stream": "yes or no"
                   }}
+
+                  Output only the JSON structure. Do not add any explanation or commentary.
                   """
 
         resp = self.client.chat.completions.create(model=self.llm_model,
@@ -44,18 +67,56 @@ class CafeFinder:
         content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.DOTALL)
 
         try:
-            return json.loads(content)
+            content = json.loads(content)
         except json.JSONDecodeError:
-            return {"name": None, "area": None, "smoke": None, "open_space": None, "game": None, "TV": None}
+            return {"name": None,
+                    "area": None,
+                    "subway": None,
+                    "smoking": None,
+                    "open_space": None,
+                    "breakfast": None,
+                    "music": None,
+                    "vip_space": None,
+                    "entertainment": None,
+                    "WiFi": None,
+                    "time_limit": None,
+                    "stream": None}
+
+        required_keys = ["name", "area", "subway", "smoking", "open_space", "breakfast",
+                         "music", "vip_space", "entertainment", "WiFi", "time_limit", "stream"]
+        boolean_keys = ["smoking", "open_space", "breakfast", "music", "vip_space", "entertainment",
+                        "WiFi", "time_limit", "stream"]
+
+        for key in required_keys:
+            if key not in content:
+                content[key] = None
+
+        for key in boolean_keys:
+            value = content.get(key)
+            if isinstance(value, str):
+                if value.lower() == "yes":
+                    content[key] = True
+                elif value.lower() == "no":
+                    content[key] = False
+            else:
+                content[key] = None
+
+        return content
+
 
     def _calculate_points(self, document, criteria):
         points = 0
         
-        for key in ['سیگار کشیدن', 'فضای باز', 'بازی و سرگرمی', 'تلویزیون']:
-            if key in criteria and document.get(key) == criteria[key]:
-                points += 1
+        for key in ["smoking", "open_space", "breakfast", "music", "vip_space", 
+                    "entertainment", "WiFi", "time_limit", "stream"]:
+            if key in criteria and key in list(document.keys()):
+                if document.get(key) == criteria[key]:
+                    points += 1
 
         if 'name' in criteria and criteria['name'] is not None and criteria['name'] in document.get('name', ''):
+            points += 1
+
+        if 'subway' in criteria and criteria['subway'] is not None and criteria['subway'] in document.get('subway', ''):
             points += 1
 
         if 'area' in criteria:
@@ -63,10 +124,10 @@ class CafeFinder:
                 points += 1
             elif criteria['area'] in document.get('address', ''):
                 points += 1
-        
         return points
     
-    def _retieve_objects(self, criteria):
+
+    def _retrieve_objects(self, criteria):
         cursor = self.collection.find()
         result = []
 
@@ -80,102 +141,136 @@ class CafeFinder:
                     max_point = points
 
         result_sorted = sorted(result, key=lambda x: x['point'], reverse=True)
-
         return result_sorted, max_point
     
-    def llm_agent(self, query, system_prompt, messages):
-        if messages == []:
-            messages=[
-                {"role": "system", "content": "تو یک دستیار هوشمند هستی که به افراد کمک می‌کند تا کافه یا رستوران مورد نظرشان را پیدا کنند."},
-                {"role": "user", "content": f"پیام کاربر: {query}"},
-                {"role": "assistant", "content": f"وضعیت پیدا کردن کافه یا رستوران مورد نظر: {system_prompt}"}
-            ]
-        else:
-            messages.append(
-                {"role": "user", "content": f"پیام کاربر: {query}"},
-                {"role": "assistant", "content": f"وضعیت پیدا کردن کافه یا رستوران مورد نظر: {system_prompt}"}
-            )
 
-        resp = self.client.chat.completions.create(model=self.llm_model, messages=messages)
+    def _llm_agent(self, chat_id, chat_data, system_prompt, status, items):
+        chat_data = self._update_id(chat_id=chat_id, system_prompt=system_prompt, status=status, items=items)
+        resp = self.client.chat.completions.create(model=self.llm_model, messages=chat_data["history"])
         llm_response = resp.choices[0].message.content.strip()
 
-        messages.append({"role": "assistant", "content": llm_response})
+        self.chats.update_one(
+            {"chat_id": chat_id},
+            {
+                "$push": {
+                    "history": {"role": "assistant", "content": llm_response}
+                }
+            }
+        )
 
-        return llm_response, messages
+        chat_data = self.chats.find_one({"chat_id": chat_id})
+        return chat_data
+    
 
-    def find_cafe(self, query, former_messages, former_criteria):
-        criteria = self.extraction_agent(query)
+    def _create_id(self, query):
+        chat_id = str(uuid.uuid4())
 
-        mapping = {
-            'smoke': 'سیگار کشیدن',
-            'open_space': 'فضای باز',
-            'game': 'بازی و سرگرمی',
-            'TV': 'تلویزیون'
-        }
+        history = [
+            {"role": "system", "content": self.main_system_prompt},
+            {"role": "user", "content": f"پیام کاربر: {query}"}
+        ]
 
-        for key, new_value in mapping.items():
-            if key in criteria:
-                criteria[key] = new_value
+        latest_criteria = {"name": None,
+                           "area": None,
+                           "subway": None,
+                           "smoking": None,
+                           "open_space": None,
+                           "breakfast": None,
+                           "music": None,
+                           "vip_space": None,
+                           "entertainment": None,
+                           "WiFi": None,
+                           "time_limit": None,
+                           "stream": None}
+        
+        self.chats.insert_one({
+            "chat_id": chat_id,
+            "history": history,
+            "latest_criteria": latest_criteria
+        })
+        return chat_id, latest_criteria
+    
 
-        for key in former_criteria:
-            if criteria[key] is not None:
-                former_criteria[key] = criteria[key]
+    def _retrieve_id(self, chat_id, query):
+        self.chats.update_one(
+            {"chat_id": chat_id},
+            {
+                "$push": {
+                    "history": {"role": "user", "content": f"پیام کاربر: {query}"}
+                }
+            }
+        )
+        
+        chat_data = self.chats.find_one({"chat_id": chat_id})
+        return chat_data["latest_criteria"]
+    
 
-        required_point = sum(1 for value in former_criteria.values() if value is not None)
+    def _update_id(self, chat_id, system_prompt, status, items):
+        self.chats.update_one(
+            {"chat_id": chat_id},
+            {
+                "$push": {
+                    "history": {"role": "assistant", "content": f"وضعیت پیدا کردن کافه یا رستوران مورد نظر: {system_prompt}"}
+                },
+                "$set": {
+                    "status": status,
+                    "items": items
+                }
+            }
+        )
+
+        chat_data = self.chats.find_one({"chat_id": chat_id})
+        return chat_data
+
+
+    def find_cafe(self, query, chat_id=None):
+        if chat_id is None:
+            chat_id, latest_criteria = self._create_id(query)
+            logging.info(f"Chat created with this ID: {chat_id}")
+        else:
+            latest_criteria = self._retrieve_id(chat_id, query)
+            logging.info(f"Chat retrieved with this ID: {chat_id}")
+
+        new_criteria = self.extraction_agent(query)
+        logging.info(f"Extracted information: {new_criteria}")
+
+        for key in latest_criteria:
+            if new_criteria[key] is not None:
+                latest_criteria[key] = new_criteria[key]
+        logging.info(f"Updated information: {latest_criteria}")
+
+        required_point = sum(1 for value in latest_criteria.values() if value is not None)
+        logging.info(f"Number of required criteria: {required_point}")
+
+        result_sorted, max_point = self._retrieve_objects(latest_criteria)
+        chat_data = self.chats.find_one({"chat_id": chat_id})
+        logging.info(f"Number of retrieved items: {len(result_sorted)}")
+        logging.info(f"With the maximum point: {max_point}")
 
         if required_point == 0:
-            system_prompt = "برای این پیام کاربر موردی برای نشان دادن پیدا نشد"
-            status = "no valid filter"
-
-            llm_response, messages = self.llm_agent(query, system_prompt, former_messages)
-
-            return {
-                "status": status,
-                "llm_response": llm_response,
-                "items": [],
-                "criteria": former_criteria,
-                "messages": messages
-            }
-
-        result_sorted, max_point = self._retieve_objects(former_criteria)
-        
-        if not result_sorted:
+            system_prompt="برای این پیام کاربر موردی برای نشان دادن پیدا نشد"
+            status="no valid filter"
+        elif not result_sorted:
             system_prompt = """
-            برای این پیام کاربر موردی برای نشان دادن پیدا نشد
-            به او بگو که با مشخصات دیگری دوباره تلاش کند
-            """
-            status = "not found"
+                            برای این پیام کاربر موردی برای نشان دادن پیدا نشد
+                            به او بگو که با مشخصات دیگری دوباره تلاش کند
+                            """
+            status="not found"
         elif max_point < required_point:
             system_prompt = f"""
-            برای این پیام کاربر
-            {len(result_sorted)}
-            مورد پیدا شد ولی دقیقا مطابق خواسته های او نیست
-            به او بگو که میتواند موارد پیدا شده را در سمت چپ تصویر ببیند
-            """
-            status = "incomplete"
+                             برای این پیام کاربر
+                             {len(result_sorted)}
+                             مورد پیدا شد ولی دقیقا مطابق خواسته های او نیست
+                             به او بگو که میتواند موارد پیدا شده را در سمت چپ تصویر ببیند
+                             """
+            status="incomplete"
         else:
             system_prompt = f"""
-            محل مورد نظر پیدا شد
-            به او بگو که میتواند موارد پیدا شده را در سمت چپ تصویر ببیند
-            """
-            status = "complete"
-
-        llm_response, messages = self.llm_agent(query, system_prompt, former_messages)
-
-        return {
-            "status": status,
-            "llm_response": llm_response,
-            "items": result_sorted,
-            "criteria": former_criteria,
-            "messages": messages
-        }
-
-
-if __name__ == "__main__":
-    my_class = CafeFinder("تهران (استان)", "aa-cMenpBRK6Adc94FY7GOCGfWsL3ac5JNn7guKcWPxGw0WwmLg", "https://api.avalai.ir/v1", "gpt-4o")
-
-    answer = my_class.find_cafe("من یه کافه با فضای باز میخواستم اطراف خیبون شریعتی که بشه توش سیگار کشید.",
-                                [],
-                                {"name": None, "area": None, "smoke": None, "open_space": None, "game": None, "TV": None})
-
-    print(answer)
+                             محل مورد نظر پیدا شد
+                             به او بگو که میتواند موارد پیدا شده را در سمت چپ تصویر ببیند
+                             """
+            status="complete"
+        
+        chat_data = self._llm_agent(chat_id=chat_id, chat_data=chat_data, system_prompt=system_prompt, status=status, items=result_sorted)
+        logging.info(f"Conversation finished")
+        return chat_data
