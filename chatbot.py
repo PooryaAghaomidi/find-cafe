@@ -127,12 +127,36 @@ class CafeFinder:
         return points
     
 
+    def _process_doc(self, document):
+        required_keys = ["name", "area", "subway", "smoking", "open_space", "breakfast",
+                         "music", "vip_space", "entertainment", "WiFi", "time_limit", "stream"]
+        boolean_keys = ["smoking", "open_space", "breakfast", "music", "vip_space", "entertainment",
+                        "WiFi", "time_limit", "stream"]
+
+        for key in required_keys:
+            if key not in document:
+                document[key] = None
+
+        for key in boolean_keys:
+            value = document.get(key)
+            if isinstance(value, str):
+                if value.lower() == "yes":
+                    document[key] = True
+                elif value.lower() == "no":
+                    document[key] = False
+            else:
+                document[key] = None
+        
+        return document
+    
+
     def _retrieve_objects(self, criteria):
         cursor = self.collection.find()
         result = []
 
         max_point = 0
         for document in cursor:
+            document = self._process_doc(document)
             points = self._calculate_points(document, criteria)
             if points > 0:
                 result.append({'object': document, 'point': points})
@@ -221,6 +245,11 @@ class CafeFinder:
 
         chat_data = self.chats.find_one({"chat_id": chat_id})
         return chat_data
+    
+
+    def _update_criteria(self, chat_id, latest_criteria):
+        self.chats.update_one({"chat_id": chat_id},
+                              {"$set": {"latest_criteria": latest_criteria}})
 
 
     def find_cafe(self, query, chat_id=None):
@@ -237,6 +266,7 @@ class CafeFinder:
         for key in latest_criteria:
             if new_criteria[key] is not None:
                 latest_criteria[key] = new_criteria[key]
+        self._update_criteria(chat_id, latest_criteria)
         logging.info(f"Updated information: {latest_criteria}")
 
         required_point = sum(1 for value in latest_criteria.values() if value is not None)
@@ -246,6 +276,9 @@ class CafeFinder:
         chat_data = self.chats.find_one({"chat_id": chat_id})
         logging.info(f"Number of retrieved items: {len(result_sorted)}")
         logging.info(f"With the maximum point: {max_point}")
+
+        result_sorted[:] = [item for item in result_sorted if item['point'] == max_point]
+        logging.info(f"Number of retrieved items after filtering: {len(result_sorted)}")
 
         if required_point == 0:
             system_prompt="برای این پیام کاربر موردی برای نشان دادن پیدا نشد"
