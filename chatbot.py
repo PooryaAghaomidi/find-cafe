@@ -17,25 +17,28 @@ class CafeFinder:
 
         logging.basicConfig(level=logging.INFO)
 
-        self.main_system_prompt = "تو یک دستیار هوشمند هستی که به افراد کمک می‌کند تا کافه یا رستوران مورد نظرشان را پیدا کنند."
+        self.main_system_prompt = """
+                                  تو یک دستیار هوشمند هستی که به افراد کمک می‌کند تا کافه یا رستوران مورد نظرشان را پیدا کنند.
+                                  من به تو میگویم که وضعیت پیدا شدن یا نشدن کافه مورد نظر چیست و تو به کاربر نتیجه را اطلاع بده
+                                  """
 
 
     def extraction_agent(self, text):
         prompt = f"""
                   You are a helpful assistant. You extract information related to cafe or restaurant features.
                   Here are the features you must extract from a Persian text you get:
-                  1. Name of the place
-                  2. Location or area of the place
-                  3. Nearest subway
-                  4. If you can smoke
-                  5. If you can play game (entertainment)
-                  6. If you can watch TV stream
-                  7. If it has an open space
-                  8. If they serve breakfast
-                  9. If they play music
-                  10. If they have VIP space
-                  11. If they have Wi-Fi
-                  12. If they have time limit
+                  1. name: Name of the place (نام کافه یا رستوران)
+                  2. area: Location or area of the place  (محله یا آدرس کافه یا رستوران)
+                  3. subway: Nearest subway station name  (نزدیکی کافه یا رستوران به کدام ایستگاه مترو)
+                  4. smoking: If you can smoke  (امکان سیگار کشیدن در کافه یا رستوران)
+                  5. entertainment: If you can play game (امکان بازی و سرگرمی در کافه یا رستوران)
+                  6. stream: If you can watch TV stream  (امکان تماشای تلویزیون یا داشتن ویدئو پروژکتور برای دیدن فوتبال)
+                  7. open_space: If it has an open space  (فضای باز بدون سقف یا روف گاردن)
+                  8. breakfast: If they serve breakfast  (داشتن صبحانه در منو)
+                  9. music: If they play music  (پخش موسیقی در کافه یا رستوران)
+                  10. vip_space: If they have VIP space  (داشتن فضای ویژه یا اختصاصی در کافه یا رستوران)
+                  11. WiFi: If they have Wi-Fi  (داشتن اینترنت در کافه یا رستوران)
+                  12. time_limit: If they have time limit  (محدودیت زمانی برای نشستن در کافه یا رستوران)
 
                   Message:
                   {text}
@@ -170,7 +173,7 @@ class CafeFinder:
 
     def _llm_agent(self, chat_id, chat_data, system_prompt, status, items):
         chat_data = self._update_id(chat_id=chat_id, system_prompt=system_prompt, status=status, items=items)
-        resp = self.client.chat.completions.create(model=self.llm_model, messages=chat_data["history"])
+        resp = self.client.chat.completions.create(model=self.llm_model, messages=chat_data["history"], temperature=0.1)
         llm_response = resp.choices[0].message.content.strip()
 
         self.chats.update_one(
@@ -272,37 +275,40 @@ class CafeFinder:
         required_point = sum(1 for value in latest_criteria.values() if value is not None)
         logging.info(f"Number of required criteria: {required_point}")
 
-        result_sorted, max_point = self._retrieve_objects(latest_criteria)
-        chat_data = self.chats.find_one({"chat_id": chat_id})
-        logging.info(f"Number of retrieved items: {len(result_sorted)}")
-        logging.info(f"With the maximum point: {max_point}")
-
-        result_sorted[:] = [item for item in result_sorted if item['point'] == max_point]
-        logging.info(f"Number of retrieved items after filtering: {len(result_sorted)}")
-
         if required_point == 0:
             system_prompt="برای این پیام کاربر موردی برای نشان دادن پیدا نشد"
             status="no valid filter"
-        elif not result_sorted:
-            system_prompt = """
-                            برای این پیام کاربر موردی برای نشان دادن پیدا نشد
-                            به او بگو که با مشخصات دیگری دوباره تلاش کند
-                            """
-            status="not found"
-        elif max_point < required_point:
-            system_prompt = f"""
-                             برای این پیام کاربر
-                             {len(result_sorted)}
-                             مورد پیدا شد ولی دقیقا مطابق خواسته های او نیست
-                             به او بگو که میتواند موارد پیدا شده را در سمت چپ تصویر ببیند
-                             """
-            status="incomplete"
+            result_sorted = []
+            chat_data = self.chats.find_one({"chat_id": chat_id})
         else:
-            system_prompt = f"""
-                             محل مورد نظر پیدا شد
-                             به او بگو که میتواند موارد پیدا شده را در سمت چپ تصویر ببیند
-                             """
-            status="complete"
+            result_sorted, max_point = self._retrieve_objects(latest_criteria)
+            chat_data = self.chats.find_one({"chat_id": chat_id})
+            logging.info(f"Number of retrieved items: {len(result_sorted)}")
+            logging.info(f"With the maximum point: {max_point}")
+
+            result_sorted[:] = [item for item in result_sorted if item['point'] == max_point]
+            logging.info(f"Number of retrieved items after filtering: {len(result_sorted)}")
+
+            if not result_sorted:
+                system_prompt = """
+                                برای این پیام کاربر موردی برای نشان دادن پیدا نشد
+                                به او بگو که با مشخصات دیگری دوباره تلاش کند
+                                """
+                status="not found"
+            elif max_point < required_point:
+                system_prompt = f"""
+                                برای این پیام کاربر
+                                {len(result_sorted)}
+                                مورد پیدا شد ولی دقیقا مطابق خواسته های او نیست
+                                به او بگو که میتواند موارد پیدا شده را در قسمت نتایج ببیند
+                                """
+                status="incomplete"
+            else:
+                system_prompt = f"""
+                                محل مورد نظر پیدا شد
+                                به او بگو که میتواند موارد پیدا شده را در قسمت نتایج ببیند
+                                """
+                status="complete"
         
         chat_data = self._llm_agent(chat_id=chat_id, chat_data=chat_data, system_prompt=system_prompt, status=status, items=result_sorted)
         logging.info(f"Conversation finished")

@@ -1,3 +1,11 @@
 [theme]
-base="light"
 font = "B Yekan"
+
+[server]
+headless = true
+
+[ui]
+hide_sidebar_nav = true
+
+[layout]
+initial_sidebar_state = "collapsed"
