@@ -46,6 +46,11 @@ if "messages" not in st.session_state:
 if "last_cafes" not in st.session_state:
     st.session_state.last_cafes = []
 
+def on_card_click(cafe):
+    st.session_state.selected_cafe = cafe
+    st.toast(f"Clicked on {cafe.get('name', 'Cafe')}")
+    st.switch_page("pages/cafe.py")
+
 # --- Split into two columns ---
 col1, col2 = st.columns([2, 2])
 user_input = st.chat_input("مثلا یک کافه اطراف سعادت آباد خواستم که فضای باز داشته باشه")
@@ -56,9 +61,7 @@ with col1:
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
-
-        
-
+                
         if user_input:
             st.chat_message("user").markdown(user_input)
             st.session_state.messages.append({"role": "user", "content": user_input})
@@ -75,19 +78,21 @@ with col1:
             st.session_state.last_cafes = cafes
             st.session_state.show_results_button = True
 
-    if st.session_state.last_cafes:
+    if st.session_state.get("last_cafes"):
         with col2:
-            df = pd.DataFrame(st.session_state.last_cafes)
-            try:
-                df = df.drop(columns=[
-                    '_id', 'url', 'country', 'province', 'city', 'index',
-                    'menu_bests', 'subway', 'working_hours', 'self_service', 'حق سرویس'
-                ], errors='ignore')
+            cafes = st.session_state.last_cafes
+            num_cols = 5
+            rows = [cafes[i:i + num_cols] for i in range(0, len(cafes), num_cols)]
 
-                df[['address', 'phone']] = df[['address', 'phone']].map(
-                    lambda x: x.replace(":", "") if isinstance(x, str) else x
-                )
-            except:
-                pass
+            for row in rows:
+                cols = st.columns(len(row), gap="small")
+                for cafe, col in zip(row, cols):
+                    with col:
+                        card_container = st.container()
+                        with card_container:
+                            st.image("pages/1.jpg", width=150)
 
-            st.dataframe(df, use_container_width=True, height=500)
+                            button_label = cafe.get("name", "Cafe")
+
+                            if st.button(button_label, key=f"btn_{button_label}"):
+                                on_card_click(cafe)
