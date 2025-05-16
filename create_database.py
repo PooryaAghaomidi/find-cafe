@@ -1,9 +1,10 @@
+import os
 import json
 from tqdm import tqdm
 from pymongo import MongoClient
 
-
-client = MongoClient("mongodb://localhost:27017/")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+client = MongoClient(MONGO_URI)
 db = client["places"]
 
 def get_collection_name(cafe):
@@ -109,5 +110,12 @@ if __name__ == "__main__":
         collection_name = get_collection_name(cafe)
         processed = process_cafe_data(cafe)
 
-        db[collection_name].insert_one(processed)
-        tqdm.write(f"[SAVED] {processed['name']} → {collection_name}")
+        if db[collection_name].find_one({"name": processed["name"]}):
+            tqdm.write(f"[SKIPPED] {processed['name']} already exists")
+            continue
+
+        try:
+            db[collection_name].insert_one(processed)
+            tqdm.write(f"[SAVED] {processed['name']} → {collection_name}")
+        except Exception as e:
+            tqdm.write(f"[ERROR] Failed to insert {processed['name']}: {e}")

@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import uuid
@@ -8,7 +9,8 @@ from pymongo import MongoClient
 
 class CafeFinder:
     def __init__(self, province, api_key, base_url, llm_model="gpt-4o"):
-        client = MongoClient("mongodb://localhost:27017/")
+        MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+        client = MongoClient(MONGO_URI)
         self.collection = client["places"][province]
         self.chats = client["places"]["chats"]
 
