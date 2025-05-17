@@ -1,6 +1,11 @@
+import os
 import base64
 import streamlit as st
 from chatbot import CafeFinder
+
+LLM_KEY = os.getenv("LLM_KEY", "aa-cMenpBRK6Adc94FY7GOCGfWsL3ac5JNn7guKcWPxGw0WwmLg")
+LLM_URL = os.getenv("LLM_URL", "https://api.avalai.ir/v1")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
 
 CITIES = ["اصفهان", "تهران (استان)", "خراسان رضوی", "هرمزگان", "کرمان", "مازندران", "البرز", "فارس", "اردبیل",
           "گیلان", "گلستان", "آذربایجان شرقی", "سمنان", "کرمانشاه", "خوزستان", "بوشهر", "استان قزوین", "آذربایجان غربی"
@@ -119,12 +124,7 @@ selected_city = st.selectbox("لطفا شهر خود را انتخاب کنید"
 
 # --- Start Conversation ---
 if st.button("شروع گشتن در این شهر"):
-    st.session_state.my_class = CafeFinder(
-        selected_city,
-        "aa-cMenpBRK6Adc94FY7GOCGfWsL3ac5JNn7guKcWPxGw0WwmLg",
-        "https://api.avalai.ir/v1",
-        "gpt-4o"
-    )
+    st.session_state.my_class = CafeFinder(selected_city, LLM_KEY, LLM_URL, LLM_MODEL)
     st.session_state.chat_started = True
     st.session_state.messages = [{"role": "assistant", "content": "سلام 😀 برای پیدا کردن کافه چه ویژگی هایی تو ذهنته؟"}]
     st.session_state.chat_id = None
