@@ -15,4 +15,4 @@ COPY . .
 EXPOSE 8501
 
 # Run database init and then launch Streamlit
-CMD ["bash", "-c", "python create_database.py && streamlit run home.py --server.port=8501 --server.enableCORS=false --server.headless=true"]
+CMD ["bash", "-c", "streamlit run home.py --server.port=80 --server.headless=true"]
